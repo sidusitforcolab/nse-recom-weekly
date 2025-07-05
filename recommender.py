@@ -1,36 +1,69 @@
+
 import pandas as pd
 import yfinance as yf
+from prophet import Prophet
 from datetime import datetime, timedelta
 import os
+import warnings
 
-# Define your stock universe (NSE tickers via Yahoo Finance)
-stocks = ['RELIANCE.NS', 'INFY.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS',
-          'KOTAKBANK.NS', 'SBIN.NS', 'LT.NS', 'BHARTIARTL.NS', 'AXISBANK.NS']
+warnings.filterwarnings("ignore")
 
-# Define the past week's date range
-end_date = datetime.today()
-start_date = end_date - timedelta(days=7)
-
-# Collect price data
-data = yf.download(stocks, start=start_date, end=end_date)['Adj Close']
-
-# Drop columns with all NaNs
-data = data.dropna(axis=1, how='all')
-
-# Calculate returns
-returns = (data.iloc[-1] - data.iloc[0]) / data.iloc[0] * 100
-
-# Create a DataFrame of results
-result_df = pd.DataFrame({
-    "Symbol": returns.index.str.replace('.NS', '', regex=False),
-    "Weekly Return %": returns.values
-}).sort_values(by="Weekly Return %", ascending=False)
-
-# Select top 5
-top_picks = result_df.head(5)
-
-# Save output
+# 📁 Output directory
 os.makedirs("output", exist_ok=True)
-top_picks.to_csv("output/weekly_top_stocks.csv", index=False)
 
-print("✅ Weekly stock recommendation complete. Output saved.")
+# ✅ Load ticker symbols from CSV
+try:
+    df_symbols = pd.read_csv("nse_stock_list.csv")
+    symbols = df_symbols["SYMBOL"].dropna().unique().tolist()
+    tickers = [symbol.strip().upper() + ".NS" for symbol in symbols]
+    print(f"✅ Loaded {len(tickers)} tickers from CSV.")
+except Exception as e:
+    print("❌ Error reading CSV:", e)
+    tickers = []
+
+# 📅 Set date range
+end = datetime.today()
+start = end - timedelta(days=365 * 1.5)
+
+results = []
+
+for ticker in tickers:
+    print(f"📈 Processing {ticker} ...")
+    try:
+        df = yf.download(ticker, start=start, end=end)[['Adj Close']]
+    except:
+        continue
+
+    if df.empty or len(df) < 250:
+        print(f"⚠️ Not enough data for {ticker}. Skipping.")
+        continue
+
+    df.reset_index(inplace=True)
+    df.rename(columns={'Date': 'ds', 'Adj Close': 'y'}, inplace=True)
+
+    try:
+        model = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+        model.fit(df)
+
+        future = model.make_future_dataframe(periods=7)
+        forecast = model.predict(future)
+
+        last_price = df['y'].iloc[-1]
+        predicted_price = forecast['yhat'].iloc[-1]
+        return_pct = (predicted_price - last_price) / last_price * 100
+
+        results.append({
+            "Symbol": ticker.replace(".NS", ""),
+            "Forecast Return %": round(return_pct, 2)
+        })
+    except Exception as e:
+        print(f"❌ Error with {ticker}: {e}")
+        continue
+
+# ✅ Rank and output
+df_results = pd.DataFrame(results).sort_values(by="Forecast Return %", ascending=False)
+top5 = df_results.head(5)
+top5.to_csv("output/weekly_top_stocks.csv", index=False)
+
+print("\n✅ Top 5 Recommendations:")
+print(top5)
