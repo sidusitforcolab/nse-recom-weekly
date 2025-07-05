@@ -1,0 +1,40 @@
+name: Weekly Stock Recommender
+
+on:
+  schedule:
+    - cron: '30 4 * * 1'  # Every Monday at 10:00 AM IST
+  workflow_dispatch:
+
+jobs:
+  run-model:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run your script
+        run: python recommender.py
+
+      - name: Send Email Notification
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python email_notifier.py
+
+      - name: Commit output
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add output/
+          git commit -m "🔁 Weekly run output"
+          git push
